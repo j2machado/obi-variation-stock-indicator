@@ -316,31 +316,62 @@ class OBI_Variation_Stock_Indicator {
 
                 function updateVariationStatus() {
                     var selectedAttrs = {};
+                    var allPreviousSelected = true;
+                    var lastAttrName = $lastDropdown.attr('name');
+                    var foundLastAttr = false;
+
+                    // Check if all previous attributes are selected
                     $form.find('.variations select').each(function() {
                         var $select = $(this);
                         var name = $select.data('attribute_name') || $select.attr('name');
-                        selectedAttrs[name] = $select.val() || '';
+                        var value = $select.val() || '';
+                        
+                        if (name === lastAttrName) {
+                            foundLastAttr = true;
+                            return false; // break the loop
+                        }
+                        
+                        if (!value) {
+                            allPreviousSelected = false;
+                            return false; // break the loop
+                        }
+                        
+                        selectedAttrs[name] = value;
                     });
 
-                    // Reset all options in last dropdown first
+                    // Reset all options in last dropdown
                     $lastDropdown.find('option').each(function() {
-                        updateOptionText(this, null);
+                        var $option = $(this);
+                        if (!$option.val()) return; // Skip empty option
+                        
+                        // If not all previous attributes are selected, just show original text
+                        if (!allPreviousSelected) {
+                            $option.text(originalTexts[$option.val()])
+                                   .prop('disabled', false);
+                            return;
+                        }
                     });
 
-                    // Get variations - either from cache, direct data, or AJAX
-                    var variations = variationsCache || $form.data('product_variations');
-                    
-                    if (variations === false && !variationsCache) {
-                        // Load via AJAX
-                        loadVariationsAjax().then(function(response) {
-                            console.log('AJAX response', response);
-                            if (response && response.success && Array.isArray(response.data)) {
-                                variationsCache = response.data;
-                                processVariations(response.data, selectedAttrs);
-                            }
-                        });
-                    } else if (variations) {
-                        processVariations(variations, selectedAttrs);
+                    // Only proceed with variation check if all previous attributes are selected
+                    if (allPreviousSelected) {
+                        // Add the last attribute to selectedAttrs for processing
+                        selectedAttrs[lastAttrName] = '';
+
+                        // Get variations - either from cache, direct data, or AJAX
+                        var variations = variationsCache || $form.data('product_variations');
+                        
+                        if (variations === false && !variationsCache) {
+                            // Load via AJAX
+                            loadVariationsAjax().then(function(response) {
+                                console.log('AJAX response', response);
+                                if (response && response.success && Array.isArray(response.data)) {
+                                    variationsCache = response.data;
+                                    processVariations(response.data, selectedAttrs);
+                                }
+                            });
+                        } else if (variations) {
+                            processVariations(variations, selectedAttrs);
+                        }
                     }
                 }
 
