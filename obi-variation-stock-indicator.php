@@ -280,17 +280,36 @@ class OBI_Variation_Stock_Indicator {
                     var originalText = originalTexts[value] || $option.text().split(' - ')[0];
                     var newText = originalText;
 
+                    console.log(stockStatus);
+
                     if (stockStatus) {
-                        if (stockStatus.max_qty) {
+                        console.log(stockStatus);
+                        if (stockStatus.on_backorder) {
+                            newText += ' - On Backorder';
+                            // Don't disable backorderable items
+                            $option.prop('disabled', false);
+                        } else if (stockStatus.max_qty) {
                             newText += ` - ${stockStatus.max_qty} in stock`;
+                            // Only disable if setting is enabled and not in stock
+                            if (wc_ajax_object.disable_out_of_stock === 'yes') {
+                                $option.prop('disabled', !stockStatus.in_stock);
+                            }
                         } else if (stockStatus.in_stock) {
                             newText += ' - In Stock';
+                            // Only disable if setting is enabled and not in stock
+                            if (wc_ajax_object.disable_out_of_stock === 'yes') {
+                                $option.prop('disabled', !stockStatus.in_stock);
+                            }
+                        } else if (stockStatus.backorders_allowed) {
+                            newText += ' - Available on Backorder';
+                            // Don't disable backorderable items
+                            $option.prop('disabled', false);
                         } else {
                             newText += ' - Out of Stock';
-                        }
-                        // Only disable if the setting is enabled
-                        if (wc_ajax_object.disable_out_of_stock === 'yes') {
-                            $option.prop('disabled', !stockStatus.in_stock);
+                            // Only disable if setting is enabled
+                            if (wc_ajax_object.disable_out_of_stock === 'yes') {
+                                $option.prop('disabled', true);
+                            }
                         }
                     } else {
                         // Only disable if the setting is enabled
@@ -394,9 +413,16 @@ class OBI_Variation_Stock_Indicator {
                         });
 
                         if (matchingVariation) {
+                            // Check if product is on backorder either through manage stock or direct stock status
+                            var isOnBackorder = matchingVariation.backorders_allowed || 
+                                               (matchingVariation.availability_html && 
+                                                matchingVariation.availability_html.includes('available-on-backorder'));
+                            
                             updateOptionText(this, {
                                 in_stock: matchingVariation.is_in_stock && matchingVariation.is_purchasable,
-                                max_qty: matchingVariation.max_qty
+                                max_qty: matchingVariation.max_qty,
+                                on_backorder: isOnBackorder,
+                                backorders_allowed: matchingVariation.backorders_allowed
                             });
                         }
                     });
