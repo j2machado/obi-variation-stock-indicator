@@ -48,6 +48,32 @@ class OBI_Variation_Stock_Indicator {
      */
     private function __construct() {
         $this->init_hooks();
+        
+        // Add AJAX handlers
+        add_action('wp_ajax_get_product_variations', array($this, 'get_product_variations'));
+        add_action('wp_ajax_nopriv_get_product_variations', array($this, 'get_product_variations'));
+    }
+    
+    /**
+     * AJAX handler for getting product variations
+     */
+    public function get_product_variations() {
+        $product_id = isset($_POST['product_id']) ? absint($_POST['product_id']) : 0;
+        
+        if (!$product_id) {
+            wp_send_json_error('No product ID provided');
+            return;
+        }
+        
+        $product = wc_get_product($product_id);
+        
+        if (!$product || !$product->is_type('variable')) {
+            wp_send_json_error('Invalid product');
+            return;
+        }
+        
+        $available_variations = $product->get_available_variations();
+        wp_send_json_success($available_variations);
     }
 
     /**
@@ -103,6 +129,11 @@ class OBI_Variation_Stock_Indicator {
         if (!is_product()) return;
 
         wp_enqueue_script('jquery');
+        
+        // Add AJAX URL to script
+        wp_localize_script('jquery', 'wc_ajax_object', array(
+            'ajax_url' => admin_url('admin-ajax.php')
+        ));
     }
 
     /**
@@ -114,146 +145,124 @@ class OBI_Variation_Stock_Indicator {
         ?>
         <script type="text/javascript">
         jQuery(document).ready(function($) {
-            var $form = $('form.variations_form');
-            
-            function updateLastDropdownOptions() {
-                console.log('Starting updateLastDropdownOptions');
+            // Wait for WooCommerce to initialize
+            $(document.body).on('wc_variation_form', 'form.variations_form', function(event) {
+                var $form = $(this);
+                var productId = $form.data('product_id');
+                var $lastDropdown = $form.find('.last-attribute');
+                var variationsCache = null;
                 
-                // Get the form data
-                var formData = $form.data();
-                console.log('Form data:', formData);
-                
-                // Get variations directly from WooCommerce's variationForm object
-                var variations = $form.data('product_variations');
-                console.log('Variation form data:', variations);
-                
-                if (variations) {
-                    console.log('Found variations:', variations);
-                    processVariations(variations);
-                } else {
-                    // If we can't get variations directly, let's hook into WooCommerce's variation events
-                    console.log('No variations found in initial state, waiting for WC events');
-                }
-            }
-            
-            function processVariations(variations) {
-                if (!variations || typeof variations !== 'object') {
-                    console.log('Invalid variations data:', variations);
-                    return;
-                }
-                
-                console.log('Processing variations:', variations);
-                
-                var $lastDropdown = $('.last-attribute');
                 if (!$lastDropdown.length) {
                     console.log('No last-attribute dropdown found');
                     return;
                 }
-                
-                var $dropdowns = $form.find('.variations select');
-                var currentSelections = {};
-                
-                // Build current selections
-                $dropdowns.each(function() {
-                    var $this = $(this);
-                    var name = $this.data('attribute_name') || $this.attr('name');
-                    var value = $this.val();
-                    
-                    if (value) {
-                        // Store the name without the 'attribute_' prefix
-                        var cleanName = name.replace('attribute_', '');
-                        currentSelections[cleanName] = value;
-                    }
-                });
-                
-                console.log('Current selections:', currentSelections);
-                
-                // Update each option in the last dropdown
+
+                // Store original text for each option
+                var originalTexts = {};
                 $lastDropdown.find('option').each(function() {
-                    if (!$(this).val()) return; // Skip empty option
-                    
-                    var option = $(this);
-                    var originalText = option.text().split(' - ')[0];
-                    var optionValue = option.val();
-                    var lastAttributeName = $lastDropdown.data('attribute_name') || $lastDropdown.attr('name');
-                    
-                    // Test this combination
-                    var testAttributes = {...currentSelections};
-                    testAttributes[lastAttributeName] = optionValue;
-                    
-                    var isAvailable = false;
-                    var stockInfo = '';
-                    
-                    // Check if this combination exists in variations
-                    variations.forEach(function(variation) {
-                        console.log('Checking variation:', variation);
-                        var matches = true;
-                        
-                        // Check each attribute for this variation
-                        Object.entries(testAttributes).forEach(function([attrName, attrValue]) {
-                            // Remove 'attribute_' if it's already in the name
-                            var cleanAttrName = attrName.replace('attribute_', '');
-                            var wcAttrName = 'attribute_' + cleanAttrName.toLowerCase();
-                            console.log('Checking attribute:', wcAttrName, 'Expected:', attrValue, 'Actual:', variation.attributes[wcAttrName]);
-                            
-                            // Only check if the variation specifies this attribute
-                            if (variation.attributes[wcAttrName] !== '' && 
-                                variation.attributes[wcAttrName] !== attrValue) {
-                                console.log('Attribute mismatch');
-                                matches = false;
-                            }
-                        });
-                        
-                        if (matches) {
-                            console.log('Found matching variation:', variation);
-                            isAvailable = variation.is_purchasable && variation.is_in_stock;
-                            if (isAvailable) {
-                                stockInfo = variation.max_qty ? 
-                                          ` - ${variation.max_qty} in stock` : 
-                                          ' - In Stock';
-                                console.log('Stock info:', stockInfo);
-                            }
+                    var $option = $(this);
+                    originalTexts[$option.val()] = $option.text().split(' - ')[0];
+                });
+
+                function updateOptionText(option, stockStatus) {
+                    var $option = $(option);
+                    var value = $option.val();
+                    if (!value) return; // Skip empty option
+
+                    var originalText = originalTexts[value] || $option.text().split(' - ')[0];
+                    var newText = originalText;
+
+                    if (stockStatus) {
+                        if (stockStatus.max_qty) {
+                            newText += ` - ${stockStatus.max_qty} in stock`;
+                        } else if (stockStatus.in_stock) {
+                            newText += ' - In Stock';
+                        } else {
+                            newText += ' - Out of Stock';
+                        }
+                        $option.prop('disabled', !stockStatus.in_stock);
+                    } else {
+                        $option.prop('disabled', true);
+                        newText += ' - Out of Stock';
+                    }
+
+                    $option.text(newText);
+                }
+
+                function loadVariationsAjax() {
+                    return $.ajax({
+                        url: wc_ajax_object.ajax_url,
+                        type: 'POST',
+                        data: {
+                            action: 'get_product_variations',
+                            product_id: productId
                         }
                     });
+                }
+
+                function updateVariationStatus() {
+                    var selectedAttrs = {};
+                    $form.find('.variations select').each(function() {
+                        var $select = $(this);
+                        var name = $select.data('attribute_name') || $select.attr('name');
+                        selectedAttrs[name] = $select.val() || '';
+                    });
+
+                    // Reset all options in last dropdown first
+                    $lastDropdown.find('option').each(function() {
+                        updateOptionText(this, null);
+                    });
+
+                    // Get variations - either from cache, direct data, or AJAX
+                    var variations = variationsCache || $form.data('product_variations');
                     
-                    console.log('Final status for ' + optionValue + ':', { isAvailable, stockInfo });
-                    
-                    // Update option text and state
-                    option.text(originalText + (isAvailable ? stockInfo : ' - Out of Stock'))
-                         .prop('disabled', !isAvailable);
-                });
-            }
-            
-            // Listen for WooCommerce's variation events
-            $form.on('wc_variation_form', function() {
-                console.log('WC variation form initialized');
-                updateLastDropdownOptions();
+                    if (variations === false && !variationsCache) {
+                        // Load via AJAX
+                        loadVariationsAjax().then(function(response) {
+                            console.log('AJAX response', response);
+                            if (response && response.success && Array.isArray(response.data)) {
+                                variationsCache = response.data;
+                                processVariations(response.data, selectedAttrs);
+                            }
+                        });
+                    } else if (variations) {
+                        processVariations(variations, selectedAttrs);
+                    }
+                }
+
+                function processVariations(variations, selectedAttrs) {
+                    $lastDropdown.find('option').each(function() {
+                        var $option = $(this);
+                        var value = $option.val();
+                        
+                        if (!value) return; // Skip empty option
+
+                        // Test this specific value
+                        var testAttrs = {...selectedAttrs};
+                        testAttrs[$lastDropdown.attr('name')] = value;
+
+                        // Find matching variation
+                        var matchingVariation = variations.find(function(variation) {
+                            return Object.entries(testAttrs).every(function([name, value]) {
+                                return !value || variation.attributes[name] === '' || variation.attributes[name] === value;
+                            });
+                        });
+
+                        if (matchingVariation) {
+                            updateOptionText(this, {
+                                in_stock: matchingVariation.is_in_stock && matchingVariation.is_purchasable,
+                                max_qty: matchingVariation.max_qty
+                            });
+                        }
+                    });
+                }
+
+                // Handle variation changes
+                $form.on('woocommerce_variation_has_changed check_variations', updateVariationStatus);
+
+                // Initial update
+                updateVariationStatus();
             });
-            
-            $form.on('woocommerce_update_variation_values', function() {
-                console.log('WC variation values updated');
-                updateLastDropdownOptions();
-            });
-            
-            $form.on('found_variation', function(event, variation) {
-                console.log('Found variation:', variation);
-                updateLastDropdownOptions();
-            });
-            
-            $form.on('check_variations', function() {
-                console.log('Checking variations');
-                updateLastDropdownOptions();
-            });
-            
-            // Standard change events
-            $form.on('change', 'select', function() {
-                console.log('Select changed');
-                updateLastDropdownOptions();
-            });
-            
-            // Initial setup
-            console.log('Setting up initial handlers');
-            setTimeout(updateLastDropdownOptions, 500);
         });
         </script>
         <?php
