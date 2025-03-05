@@ -52,6 +52,109 @@ class OBI_Variation_Stock_Indicator {
         // Add AJAX handlers
         add_action('wp_ajax_get_product_variations', array($this, 'get_product_variations'));
         add_action('wp_ajax_nopriv_get_product_variations', array($this, 'get_product_variations'));
+        
+        // Add admin menu
+        add_action('admin_menu', array($this, 'add_admin_menu'));
+        add_action('admin_init', array($this, 'init_settings'));
+    }
+    
+    /**
+     * Add admin menu item
+     */
+    public function add_admin_menu() {
+        add_submenu_page(
+            'woocommerce',
+            'Variation Stock Indicator',
+            'Stock Indicator',
+            'manage_options',
+            'variation-stock-indicator',
+            array($this, 'render_admin_page')
+        );
+    }
+    
+    /**
+     * Initialize plugin settings
+     */
+    public function init_settings() {
+        register_setting(
+            'ovsi_options', 
+            'ovsi_settings',
+            array($this, 'sanitize_settings')
+        );
+        
+        add_settings_section(
+            'ovsi_general_section',
+            'General Settings',
+            array($this, 'render_section_info'),
+            'ovsi_settings'
+        );
+        
+        add_settings_field(
+            'disable_out_of_stock',
+            'Out of Stock Variations',
+            array($this, 'render_disable_setting'),
+            'ovsi_settings',
+            'ovsi_general_section'
+        );
+    }
+    
+    /**
+     * Render the settings section info
+     */
+    public function render_section_info() {
+        echo '<p>Configure how the variation stock indicator behaves.</p>';
+    }
+    
+    /**
+     * Render the disable setting field
+     */
+    public function render_disable_setting() {
+        $options = get_option('ovsi_settings', array());
+        $checked = isset($options['disable_out_of_stock']) ? $options['disable_out_of_stock'] : 'yes';
+        ?>
+        <label>
+            <input type='hidden' name='ovsi_settings[disable_out_of_stock]' value='no' />
+            <input type='checkbox' name='ovsi_settings[disable_out_of_stock]' 
+                   value='yes' <?php checked($checked, 'yes'); ?> />
+            Disable selection of out-of-stock variations
+        </label>
+        <p class="description">
+            When checked, out-of-stock variations will be disabled and cannot be selected.
+            When unchecked, out-of-stock variations can still be selected but will show the stock status.
+        </p>
+        <?php
+    }
+
+    /**
+     * Sanitize settings before saving
+     */
+    public function sanitize_settings($input) {
+        $sanitized = array();
+        if (isset($input['disable_out_of_stock'])) {
+            $sanitized['disable_out_of_stock'] = ($input['disable_out_of_stock'] === 'yes') ? 'yes' : 'no';
+        }
+        return $sanitized;
+    }
+    
+    /**
+     * Render the admin settings page
+     */
+    public function render_admin_page() {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+        ?>
+        <div class="wrap">
+            <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
+            <form action="options.php" method="post">
+            <?php
+                settings_fields('ovsi_options');
+                do_settings_sections('ovsi_settings');
+                submit_button('Save Settings');
+            ?>
+            </form>
+        </div>
+        <?php
     }
     
     /**
@@ -130,9 +233,14 @@ class OBI_Variation_Stock_Indicator {
 
         wp_enqueue_script('jquery');
         
-        // Add AJAX URL to script
+        // Get plugin settings
+        $options = get_option('ovsi_settings', array());
+        $disable_out_of_stock = isset($options['disable_out_of_stock']) ? $options['disable_out_of_stock'] : 'yes';
+        
+        // Add AJAX URL and settings to script
         wp_localize_script('jquery', 'wc_ajax_object', array(
-            'ajax_url' => admin_url('admin-ajax.php')
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'disable_out_of_stock' => $disable_out_of_stock
         ));
     }
 
@@ -180,9 +288,15 @@ class OBI_Variation_Stock_Indicator {
                         } else {
                             newText += ' - Out of Stock';
                         }
-                        $option.prop('disabled', !stockStatus.in_stock);
+                        // Only disable if the setting is enabled
+                        if (wc_ajax_object.disable_out_of_stock === 'yes') {
+                            $option.prop('disabled', !stockStatus.in_stock);
+                        }
                     } else {
-                        $option.prop('disabled', true);
+                        // Only disable if the setting is enabled
+                        if (wc_ajax_object.disable_out_of_stock === 'yes') {
+                            $option.prop('disabled', true);
+                        }
                         newText += ' - Out of Stock';
                     }
 
