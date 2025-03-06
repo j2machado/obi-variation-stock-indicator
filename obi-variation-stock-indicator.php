@@ -96,6 +96,14 @@ class OBI_Variation_Stock_Indicator {
             'ovsi_settings',
             'ovsi_general_section'
         );
+
+        add_settings_field(
+            'stock_order',
+            'Stock Order Preference',
+            array($this, 'render_stock_order_setting'),
+            'ovsi_settings',
+            'ovsi_general_section'
+        );
     }
     
     /**
@@ -126,12 +134,42 @@ class OBI_Variation_Stock_Indicator {
     }
 
     /**
+     * Render the stock order preference setting
+     */
+    public function render_stock_order_setting() {
+        $options = get_option('ovsi_settings', array());
+        $current = isset($options['stock_order']) ? $options['stock_order'] : 'disabled';
+        ?>
+        <select name='ovsi_settings[stock_order]'>
+            <option value='disabled' <?php selected($current, 'disabled'); ?>>
+                Default Order (No Reordering)
+            </option>
+            <option value='in_stock_first' <?php selected($current, 'in_stock_first'); ?>>
+                In Stock First
+            </option>
+            <option value='out_of_stock_first' <?php selected($current, 'out_of_stock_first'); ?>>
+                Out of Stock First
+            </option>
+        </select>
+        <p class="description">
+            Choose how to order the variation options in the dropdown.
+            This affects the last attribute dropdown only.
+        </p>
+        <?php
+    }
+
+    /**
      * Sanitize settings before saving
      */
     public function sanitize_settings($input) {
         $sanitized = array();
         if (isset($input['disable_out_of_stock'])) {
             $sanitized['disable_out_of_stock'] = ($input['disable_out_of_stock'] === 'yes') ? 'yes' : 'no';
+        }
+        if (isset($input['stock_order'])) {
+            $sanitized['stock_order'] = in_array($input['stock_order'], array('in_stock_first', 'out_of_stock_first', 'disabled')) 
+                ? $input['stock_order'] 
+                : 'disabled';
         }
         return $sanitized;
     }
@@ -236,12 +274,17 @@ class OBI_Variation_Stock_Indicator {
         // Get plugin settings
         $options = get_option('ovsi_settings', array());
         $disable_out_of_stock = isset($options['disable_out_of_stock']) ? $options['disable_out_of_stock'] : 'yes';
+        $stock_order = isset($options['stock_order']) ? $options['stock_order'] : 'disabled';
         
         // Add AJAX URL and settings to script
         wp_localize_script('jquery', 'wc_ajax_object', array(
             'ajax_url' => admin_url('admin-ajax.php'),
-            'disable_out_of_stock' => $disable_out_of_stock
+            'disable_out_of_stock' => $disable_out_of_stock,
+            'stock_order' => $stock_order
         ));
+        
+        // Debug output
+        error_log('Stock Order Setting: ' . $stock_order);
     }
 
     /**
@@ -279,23 +322,24 @@ class OBI_Variation_Stock_Indicator {
 
                     var originalText = originalTexts[value] || $option.text().split(' - ')[0];
                     var newText = originalText;
-
-                    console.log(stockStatus);
+                    var isInStock = false;
 
                     if (stockStatus) {
-                        console.log(stockStatus);
                         if (stockStatus.on_backorder) {
                             newText += ' - On Backorder';
                             // Don't disable backorderable items
                             $option.prop('disabled', false);
+                            isInStock = true;
                         } else if (stockStatus.max_qty) {
                             newText += ` - ${stockStatus.max_qty} in stock`;
+                            isInStock = true;
                             // Only disable if setting is enabled and not in stock
                             if (wc_ajax_object.disable_out_of_stock === 'yes') {
                                 $option.prop('disabled', !stockStatus.in_stock);
                             }
                         } else if (stockStatus.in_stock) {
                             newText += ' - In Stock';
+                            isInStock = true;
                             // Only disable if setting is enabled and not in stock
                             if (wc_ajax_object.disable_out_of_stock === 'yes') {
                                 $option.prop('disabled', !stockStatus.in_stock);
@@ -304,6 +348,7 @@ class OBI_Variation_Stock_Indicator {
                             newText += ' - Available on Backorder';
                             // Don't disable backorderable items
                             $option.prop('disabled', false);
+                            isInStock = true;
                         } else {
                             newText += ' - Out of Stock';
                             // Only disable if setting is enabled
@@ -319,7 +364,10 @@ class OBI_Variation_Stock_Indicator {
                         newText += ' - Out of Stock';
                     }
 
+                    console.log('Setting stock status for', originalText, ':', isInStock);
                     $option.text(newText);
+                    $option.data('in-stock', isInStock);
+
                 }
 
                 function loadVariationsAjax() {
@@ -331,6 +379,32 @@ class OBI_Variation_Stock_Indicator {
                             product_id: productId
                         }
                     });
+                }
+
+                function reorderOptions() {
+                    if (wc_ajax_object.stock_order === 'disabled') return;
+
+                    console.log('Reordering options with setting:', wc_ajax_object.stock_order);
+                    
+                    var $options = $lastDropdown.find('option').not(':first'); // Exclude the 'Choose an option' placeholder
+                    var sortedOptions = $options.toArray().sort(function(a, b) {
+                        var aInStock = $(a).data('in-stock');
+                        var bInStock = $(b).data('in-stock');
+                        
+                        console.log('Comparing options:', {
+                            a: { text: $(a).text(), inStock: aInStock },
+                            b: { text: $(b).text(), inStock: bInStock }
+                        });
+                        
+                        if (wc_ajax_object.stock_order === 'in_stock_first') {
+                            return (aInStock === bInStock) ? 0 : aInStock ? -1 : 1;
+                        } else { // out_of_stock_first
+                            return (aInStock === bInStock) ? 0 : aInStock ? 1 : -1;
+                        }
+                    });
+
+                    var $firstOption = $lastDropdown.find('option:first'); // Save the 'Choose an option'
+                    $lastDropdown.empty().append($firstOption).append(sortedOptions);
                 }
 
                 function updateVariationStatus() {
@@ -426,6 +500,7 @@ class OBI_Variation_Stock_Indicator {
                             });
                         }
                     });
+                    reorderOptions();
                 }
 
                 // Handle variation changes
