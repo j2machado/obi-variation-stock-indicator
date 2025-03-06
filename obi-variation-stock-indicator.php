@@ -75,6 +75,44 @@ class OBI_Variation_Stock_Indicator {
     /**
      * Initialize plugin settings
      */
+    /**
+     * Get default text strings
+     */
+    public function get_default_strings() {
+        return array(
+            'in_stock' => 'In stock',
+            'out_of_stock' => 'Out of stock',
+            'on_backorder' => 'On backorder',
+            'x_in_stock' => '%s in stock',
+            'low_stock' => 'Only %s left in stock'
+        );
+    }
+
+    /**
+     * Get customized or default text string
+     *
+     * @param string $key The text string key
+     * @param string|int $quantity Optional quantity for strings that use it
+     * @return string The customized or default text string
+     */
+    public function get_text_string($key, $quantity = null) {
+        $options = get_option('ovsi_settings', array());
+        $default_strings = $this->get_default_strings();
+        
+        // Get the custom text if set, otherwise use default
+        $text_key = 'text_' . $key;
+        $text = isset($options[$text_key]) && !empty($options[$text_key]) 
+            ? $options[$text_key] 
+            : $default_strings[$key];
+        
+        // Replace quantity placeholder if provided
+        if ($quantity !== null && strpos($text, '%s') !== false) {
+            $text = sprintf($text, $quantity);
+        }
+        
+        return $text;
+    }
+
     public function init_settings() {
         register_setting(
             'ovsi_options', 
@@ -82,6 +120,7 @@ class OBI_Variation_Stock_Indicator {
             array($this, 'sanitize_settings')
         );
         
+        // General Settings Section
         add_settings_section(
             'ovsi_general_section',
             'General Settings',
@@ -104,6 +143,34 @@ class OBI_Variation_Stock_Indicator {
             'ovsi_settings',
             'ovsi_general_section'
         );
+
+        add_settings_field(
+            'low_stock_threshold',
+            'Low Stock Threshold',
+            array($this, 'render_low_stock_threshold_setting'),
+            'ovsi_settings',
+            'ovsi_general_section'
+        );
+
+        // Text Customization Section
+        add_settings_section(
+            'ovsi_text_section',
+            'Text Customization',
+            array($this, 'render_text_section_info'),
+            'ovsi_settings'
+        );
+
+        $default_strings = $this->get_default_strings();
+        foreach ($default_strings as $key => $default_value) {
+            add_settings_field(
+                'text_' . $key,
+                ucwords(str_replace('_', ' ', $key)),
+                array($this, 'render_text_field'),
+                'ovsi_settings',
+                'ovsi_text_section',
+                array('key' => $key, 'default' => $default_value)
+            );
+        }
     }
     
     /**
@@ -111,6 +178,27 @@ class OBI_Variation_Stock_Indicator {
      */
     public function render_section_info() {
         echo '<p>Configure how the variation stock indicator behaves.</p>';
+    }
+
+    public function render_text_section_info() {
+        echo '<p>Customize the text strings used to display stock status. Leave empty to use default values.</p>';
+    }
+
+    public function render_text_field($args) {
+        $options = get_option('ovsi_settings', array());
+        $key = $args['key'];
+        $default = $args['default'];
+        $value = isset($options['text_' . $key]) ? $options['text_' . $key] : '';
+        ?>
+        <input type='text' 
+               name='ovsi_settings[text_<?php echo esc_attr($key); ?>]' 
+               value='<?php echo esc_attr($value); ?>' 
+               class='regular-text'
+               placeholder='<?php echo esc_attr($default); ?>'
+        />
+        <?php if ($key === 'x_in_stock' || $key === 'low_stock'): ?>
+            <p class="description">Use %s as a placeholder for the stock quantity.</p>
+        <?php endif;
     }
     
     /**
@@ -159,6 +247,27 @@ class OBI_Variation_Stock_Indicator {
     }
 
     /**
+     * Render the low stock threshold setting
+     */
+    public function render_low_stock_threshold_setting() {
+        $options = get_option('ovsi_settings', array());
+        $threshold = isset($options['low_stock_threshold']) ? absint($options['low_stock_threshold']) : 10;
+        ?>
+        <input type='number' 
+               name='ovsi_settings[low_stock_threshold]' 
+               value='<?php echo esc_attr($threshold); ?>'
+               min='0'
+               step='1'
+               class='small-text'
+        />
+        <p class="description">
+            When the stock quantity is at or below this number, the "Low Stock" message will be displayed instead of the regular stock message.
+            Set to 0 to disable the low stock message.
+        </p>
+        <?php
+    }
+
+    /**
      * Sanitize settings before saving
      */
     public function sanitize_settings($input) {
@@ -170,6 +279,18 @@ class OBI_Variation_Stock_Indicator {
             $sanitized['stock_order'] = in_array($input['stock_order'], array('in_stock_first', 'out_of_stock_first', 'disabled')) 
                 ? $input['stock_order'] 
                 : 'disabled';
+        }
+        if (isset($input['low_stock_threshold'])) {
+            $sanitized['low_stock_threshold'] = absint($input['low_stock_threshold']);
+        }
+
+        // Sanitize text strings
+        $default_strings = $this->get_default_strings();
+        foreach ($default_strings as $key => $default_value) {
+            $text_key = 'text_' . $key;
+            if (isset($input[$text_key])) {
+                $sanitized[$text_key] = sanitize_text_field($input[$text_key]);
+            }
         }
         return $sanitized;
     }
@@ -276,15 +397,23 @@ class OBI_Variation_Stock_Indicator {
         $disable_out_of_stock = isset($options['disable_out_of_stock']) ? $options['disable_out_of_stock'] : 'yes';
         $stock_order = isset($options['stock_order']) ? $options['stock_order'] : 'disabled';
         
-        // Add AJAX URL and settings to script
+        // Get text strings
+        $strings = array();
+        foreach ($this->get_default_strings() as $key => $default) {
+            $strings[$key] = $this->get_text_string($key);
+        }
+        
+        // Add AJAX URL, settings and strings to script
+        // Get low stock threshold
+        $low_stock_threshold = isset($options['low_stock_threshold']) ? absint($options['low_stock_threshold']) : 10;
+
         wp_localize_script('jquery', 'wc_ajax_object', array(
             'ajax_url' => admin_url('admin-ajax.php'),
             'disable_out_of_stock' => $disable_out_of_stock,
-            'stock_order' => $stock_order
+            'stock_order' => $stock_order,
+            'strings' => $strings,
+            'low_stock_threshold' => $low_stock_threshold
         ));
-        
-        // Debug output
-        error_log('Stock Order Setting: ' . $stock_order);
     }
 
     /**
@@ -326,31 +455,36 @@ class OBI_Variation_Stock_Indicator {
 
                     if (stockStatus) {
                         if (stockStatus.on_backorder) {
-                            newText += ' - On Backorder';
+                            newText += ' - ' + wc_ajax_object.strings.on_backorder;
                             // Don't disable backorderable items
                             $option.prop('disabled', false);
                             isInStock = true;
                         } else if (stockStatus.max_qty) {
-                            newText += ` - ${stockStatus.max_qty} in stock`;
+                            // Check if this is low stock
+                            if (stockStatus.max_qty <= wc_ajax_object.low_stock_threshold) {
+                                newText += ' - ' + wc_ajax_object.strings.low_stock.replace('%s', stockStatus.max_qty);
+                            } else {
+                                newText += ' - ' + wc_ajax_object.strings.x_in_stock.replace('%s', stockStatus.max_qty);
+                            }
                             isInStock = true;
                             // Only disable if setting is enabled and not in stock
                             if (wc_ajax_object.disable_out_of_stock === 'yes') {
                                 $option.prop('disabled', !stockStatus.in_stock);
                             }
                         } else if (stockStatus.in_stock) {
-                            newText += ' - In Stock';
+                            newText += ' - ' + wc_ajax_object.strings.in_stock;
                             isInStock = true;
                             // Only disable if setting is enabled and not in stock
                             if (wc_ajax_object.disable_out_of_stock === 'yes') {
                                 $option.prop('disabled', !stockStatus.in_stock);
                             }
                         } else if (stockStatus.backorders_allowed) {
-                            newText += ' - Available on Backorder';
+                            newText += ' - ' + wc_ajax_object.strings.on_backorder;
                             // Don't disable backorderable items
                             $option.prop('disabled', false);
                             isInStock = true;
                         } else {
-                            newText += ' - Out of Stock';
+                            newText += ' - ' + wc_ajax_object.strings.out_of_stock;
                             // Only disable if setting is enabled
                             if (wc_ajax_object.disable_out_of_stock === 'yes') {
                                 $option.prop('disabled', true);
