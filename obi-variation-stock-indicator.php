@@ -56,6 +56,7 @@ class OBI_Variation_Stock_Indicator {
         // Add admin menu
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_init', array($this, 'init_settings'));
+        add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_scripts'));
     }
     
     /**
@@ -189,16 +190,20 @@ class OBI_Variation_Stock_Indicator {
         $key = $args['key'];
         $default = $args['default'];
         $value = isset($options['text_' . $key]) ? $options['text_' . $key] : '';
+        $needs_merge_tag = $key === 'x_in_stock' || $key === 'low_stock';
         ?>
-        <input type='text' 
-               name='ovsi_settings[text_<?php echo esc_attr($key); ?>]' 
-               value='<?php echo esc_attr($value); ?>' 
-               class='regular-text'
-               placeholder='<?php echo esc_attr($default); ?>'
-        />
-        <?php if ($key === 'x_in_stock' || $key === 'low_stock'): ?>
-            <p class="description">Use {stock} as a placeholder for the stock quantity.</p>
-        <?php endif;
+        <div class="text-field-wrapper">
+            <input type='text' 
+                   name='ovsi_settings[text_<?php echo esc_attr($key); ?>]' 
+                   value='<?php echo esc_attr($value); ?>' 
+                   class='regular-text <?php echo $needs_merge_tag ? 'requires-merge-tag' : ''; ?>'
+                   placeholder='<?php echo esc_attr($default); ?>'
+                   data-requires-merge-tag="<?php echo $needs_merge_tag ? 'true' : 'false'; ?>"
+            />
+            <?php if ($needs_merge_tag): ?>
+                <p class="description">Use {stock} as a placeholder for the stock quantity.</p>
+                <div class="merge-tag-validation" style="display: none; color: #d63638; margin-top: 5px;"></div>
+            <?php endif;
     }
     
     /**
@@ -314,6 +319,63 @@ class OBI_Variation_Stock_Indicator {
             </form>
         </div>
         <?php
+    }
+
+    /**
+     * Enqueue admin scripts and styles
+     */
+    public function enqueue_admin_scripts($hook) {
+        // Only load on our settings page
+        if ($hook !== 'woocommerce_page_variation-stock-indicator') {
+            return;
+        }
+        
+        // Add inline script for merge tag validation
+        wp_add_inline_script('jquery', '
+            jQuery(document).ready(function($) {
+                function validateMergeTag(input) {
+                    var $input = $(input);
+                    var $wrapper = $input.closest(".text-field-wrapper");
+                    var $validation = $wrapper.find(".merge-tag-validation");
+                    var value = $input.val();
+                    
+                    if (value && !value.includes("{stock}")) {
+                        $validation.html("This field must contain the {stock} merge tag").show();
+                        $input.css("border-color", "#d63638");
+                        return false;
+                    } else {
+                        $validation.hide();
+                        $input.css("border-color", "");
+                        return true;
+                    }
+                }
+                
+                // Validate on input change
+                $(".requires-merge-tag").on("input", function() {
+                    validateMergeTag(this);
+                });
+                
+                // Initial validation
+                $(".requires-merge-tag").each(function() {
+                    validateMergeTag(this);
+                });
+                
+                // Validate before form submission
+                $("form").on("submit", function(e) {
+                    var isValid = true;
+                    $(".requires-merge-tag").each(function() {
+                        if (!validateMergeTag(this)) {
+                            isValid = false;
+                        }
+                    });
+                    
+                    if (!isValid) {
+                        e.preventDefault();
+                        alert("Please fix the merge tag errors before saving.");
+                    }
+                });
+            });
+        ');
     }
     
     /**
