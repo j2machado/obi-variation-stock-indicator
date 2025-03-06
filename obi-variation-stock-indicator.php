@@ -83,8 +83,8 @@ class OBI_Variation_Stock_Indicator {
             'in_stock' => 'In stock',
             'out_of_stock' => 'Out of stock',
             'on_backorder' => 'On backorder',
-            'x_in_stock' => '%s in stock',
-            'low_stock' => 'Only %s left in stock'
+            'x_in_stock' => '{stock} in stock',
+            'low_stock' => 'Only {stock} left in stock'
         );
     }
 
@@ -105,9 +105,9 @@ class OBI_Variation_Stock_Indicator {
             ? $options[$text_key] 
             : $default_strings[$key];
         
-        // Replace quantity placeholder if provided
-        if ($quantity !== null && strpos($text, '%s') !== false) {
-            $text = sprintf($text, $quantity);
+        // Replace merge tag with quantity if provided
+        if ($quantity !== null) {
+            $text = str_replace('{stock}', $quantity, $text);
         }
         
         return $text;
@@ -197,7 +197,7 @@ class OBI_Variation_Stock_Indicator {
                placeholder='<?php echo esc_attr($default); ?>'
         />
         <?php if ($key === 'x_in_stock' || $key === 'low_stock'): ?>
-            <p class="description">Use %s as a placeholder for the stock quantity.</p>
+            <p class="description">Use {stock} as a placeholder for the stock quantity.</p>
         <?php endif;
     }
     
@@ -462,9 +462,9 @@ class OBI_Variation_Stock_Indicator {
                         } else if (stockStatus.max_qty) {
                             // Check if this is low stock
                             if (stockStatus.max_qty <= wc_ajax_object.low_stock_threshold) {
-                                newText += ' - ' + wc_ajax_object.strings.low_stock.replace('%s', stockStatus.max_qty);
+                                newText += ' - ' + wc_ajax_object.strings.low_stock.replace('{stock}', stockStatus.max_qty);
                             } else {
-                                newText += ' - ' + wc_ajax_object.strings.x_in_stock.replace('%s', stockStatus.max_qty);
+                                newText += ' - ' + wc_ajax_object.strings.x_in_stock.replace('{stock}', stockStatus.max_qty);
                             }
                             isInStock = true;
                             // Only disable if setting is enabled and not in stock
