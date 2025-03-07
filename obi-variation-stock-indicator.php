@@ -608,15 +608,9 @@ class OBI_Variation_Stock_Indicator {
                     // Restore selected value if it existed
                     if (currentValue) {
                         $select.val(currentValue);
-                    }
-
-                    // Only auto-select if there's exactly one enabled option and disable_out_of_stock is enabled
-                    if (wc_ajax_object.disable_out_of_stock === 'yes') {
-                        var $enabledOptions = $select.find('option:not(:disabled)').not(':first');
-                        if ($enabledOptions.length === 1 && !currentValue) {
-                            var newValue = $enabledOptions.val();
-                            $select.val(newValue).trigger('change');
-                        }
+                    } else {
+                        // Ensure no option is selected if there wasn't one before
+                        $select.val('');
                     }
                 }
 
@@ -671,42 +665,51 @@ class OBI_Variation_Stock_Indicator {
                 }
 
                 function processVariations(variations, selectedAttrs) {
-                    // Update option texts and disabled states
-                    $lastDropdown.find('option').each(function() {
-                        var $option = $(this);
-                        var value = $option.val();
-                        
-                        if (!value) return; // Skip empty option
+                    // Add a flag to prevent multiple reorderings in the same cycle
+                    if (processVariations.isProcessing) return;
+                    processVariations.isProcessing = true;
 
-                        // Test this specific value
-                        var testAttrs = {...selectedAttrs};
-                        testAttrs[$lastDropdown.attr('name')] = value;
+                    try {
+                        // Update option texts and disabled states
+                        $lastDropdown.find('option').each(function() {
+                            var $option = $(this);
+                            var value = $option.val();
+                            
+                            if (!value) return; // Skip empty option
 
-                        // Find matching variation
-                        var matchingVariation = variations.find(function(variation) {
-                            return Object.entries(testAttrs).every(function([name, value]) {
-                                return !value || variation.attributes[name] === '' || variation.attributes[name] === value;
+                            // Test this specific value
+                            var testAttrs = {...selectedAttrs};
+                            testAttrs[$lastDropdown.attr('name')] = value;
+
+                            // Find matching variation
+                            var matchingVariation = variations.find(function(variation) {
+                                return Object.entries(testAttrs).every(function([name, value]) {
+                                    return !value || variation.attributes[name] === '' || variation.attributes[name] === value;
+                                });
                             });
+
+                            if (matchingVariation) {
+                                var isOnBackorder = matchingVariation.backorders_allowed || 
+                                                   (matchingVariation.availability_html && 
+                                                    matchingVariation.availability_html.includes('available-on-backorder'));
+                                
+                                var stockStatus = {
+                                    in_stock: matchingVariation.is_in_stock && matchingVariation.is_purchasable,
+                                    max_qty: matchingVariation.max_qty,
+                                    on_backorder: isOnBackorder,
+                                    backorders_allowed: matchingVariation.backorders_allowed
+                                };
+
+                                updateOptionText(this, stockStatus);
+                            }
                         });
 
-                        if (matchingVariation) {
-                            var isOnBackorder = matchingVariation.backorders_allowed || 
-                                               (matchingVariation.availability_html && 
-                                                matchingVariation.availability_html.includes('available-on-backorder'));
-                            
-                            var stockStatus = {
-                                in_stock: matchingVariation.is_in_stock && matchingVariation.is_purchasable,
-                                max_qty: matchingVariation.max_qty,
-                                on_backorder: isOnBackorder,
-                                backorders_allowed: matchingVariation.backorders_allowed
-                            };
-
-                            updateOptionText(this, stockStatus);
-                        }
-                    });
-
-                    // Reorder options after updating their status
-                    reorderOptions();
+                        // Reorder options after updating their status, but only if we're not in a recursive call
+                        reorderOptions();
+                    } finally {
+                        // Always clear the processing flag
+                        processVariations.isProcessing = false;
+                    }
                 }
 
                 function initializeVariationForm() {
