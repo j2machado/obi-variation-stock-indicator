@@ -579,92 +579,99 @@ class OBI_Variation_Stock_Indicator {
 
                 function reorderOptions() {
                     if (wc_ajax_object.stock_order === 'disabled') return;
-
-                    console.log('Reordering options with setting:', wc_ajax_object.stock_order);
                     
-                    var $options = $lastDropdown.find('option').not(':first'); // Exclude the 'Choose an option' placeholder
+                    // Store current state
+                    var $select = $lastDropdown;
+                    var currentValue = $select.val();
+                    var $options = $select.find('option').not(':first');
+                    var $firstOption = $select.find('option:first');
+                    
+                    // Sort options
                     var sortedOptions = $options.toArray().sort(function(a, b) {
                         var aInStock = $(a).data('in-stock');
                         var bInStock = $(b).data('in-stock');
                         
-                        console.log('Comparing options:', {
-                            a: { text: $(a).text(), inStock: aInStock },
-                            b: { text: $(b).text(), inStock: bInStock }
-                        });
-                        
                         if (wc_ajax_object.stock_order === 'in_stock_first') {
                             return (aInStock === bInStock) ? 0 : aInStock ? -1 : 1;
-                        } else { // out_of_stock_first
+                        } else {
                             return (aInStock === bInStock) ? 0 : aInStock ? 1 : -1;
                         }
                     });
 
-                    var $firstOption = $lastDropdown.find('option:first'); // Save the 'Choose an option'
-                    $lastDropdown.empty().append($firstOption).append(sortedOptions);
+                    // Reorder options without detaching the select
+                    $select.find('option').remove();
+                    $select.append($firstOption);
+                    $(sortedOptions).each(function() {
+                        $select.append(this);
+                    });
+                    
+                    // Restore selected value if it existed
+                    if (currentValue) {
+                        $select.val(currentValue);
+                    }
+
+                    // Only auto-select if there's exactly one enabled option and disable_out_of_stock is enabled
+                    if (wc_ajax_object.disable_out_of_stock === 'yes') {
+                        var $enabledOptions = $select.find('option:not(:disabled)').not(':first');
+                        if ($enabledOptions.length === 1 && !currentValue) {
+                            var newValue = $enabledOptions.val();
+                            $select.val(newValue).trigger('change');
+                        }
+                    }
                 }
 
                 function updateVariationStatus() {
                     var selectedAttrs = {};
-                    var allPreviousSelected = true;
                     var lastAttrName = $lastDropdown.attr('name');
-                    var foundLastAttr = false;
+                    var allPreviousSelected = true;
 
                     // Check if all previous attributes are selected
                     $form.find('.variations select').each(function() {
                         var $select = $(this);
-                        var name = $select.data('attribute_name') || $select.attr('name');
+                        var name = $select.attr('name');
                         var value = $select.val() || '';
                         
                         if (name === lastAttrName) {
-                            foundLastAttr = true;
                             return false; // break the loop
                         }
                         
                         if (!value) {
                             allPreviousSelected = false;
-                            return false; // break the loop
+                            return false;
                         }
                         
                         selectedAttrs[name] = value;
                     });
 
-                    // Reset all options in last dropdown
-                    $lastDropdown.find('option').each(function() {
-                        var $option = $(this);
-                        if (!$option.val()) return; // Skip empty option
-                        
-                        // If not all previous attributes are selected, just show original text
-                        if (!allPreviousSelected) {
+                    if (!allPreviousSelected) {
+                        // Reset options to original text if not all previous attributes are selected
+                        $lastDropdown.find('option').each(function() {
+                            var $option = $(this);
+                            if (!$option.val()) return;
                             $option.text(originalTexts[$option.val()])
-                                   .prop('disabled', false);
-                            return;
-                        }
-                    });
+                                   .prop('disabled', false)
+                                   .data('in-stock', true);
+                        });
+                        return;
+                    }
 
-                    // Only proceed with variation check if all previous attributes are selected
-                    if (allPreviousSelected) {
-                        // Add the last attribute to selectedAttrs for processing
-                        selectedAttrs[lastAttrName] = '';
-
-                        // Get variations - either from cache, direct data, or AJAX
-                        var variations = variationsCache || $form.data('product_variations');
-                        
-                        if (variations === false && !variationsCache) {
-                            // Load via AJAX
-                            loadVariationsAjax().then(function(response) {
-                                console.log('AJAX response', response);
-                                if (response && response.success && Array.isArray(response.data)) {
-                                    variationsCache = response.data;
-                                    processVariations(response.data, selectedAttrs);
-                                }
-                            });
-                        } else if (variations) {
-                            processVariations(variations, selectedAttrs);
-                        }
+                    // Get variations
+                    var variations = variationsCache || $form.data('product_variations');
+                    
+                    if (variations === false && !variationsCache) {
+                        loadVariationsAjax().then(function(response) {
+                            if (response && response.success && Array.isArray(response.data)) {
+                                variationsCache = response.data;
+                                processVariations(response.data, selectedAttrs);
+                            }
+                        });
+                    } else if (variations) {
+                        processVariations(variations, selectedAttrs);
                     }
                 }
 
                 function processVariations(variations, selectedAttrs) {
+                    // Update option texts and disabled states
                     $lastDropdown.find('option').each(function() {
                         var $option = $(this);
                         var value = $option.val();
@@ -683,27 +690,89 @@ class OBI_Variation_Stock_Indicator {
                         });
 
                         if (matchingVariation) {
-                            // Check if product is on backorder either through manage stock or direct stock status
                             var isOnBackorder = matchingVariation.backorders_allowed || 
                                                (matchingVariation.availability_html && 
                                                 matchingVariation.availability_html.includes('available-on-backorder'));
                             
-                            updateOptionText(this, {
+                            var stockStatus = {
                                 in_stock: matchingVariation.is_in_stock && matchingVariation.is_purchasable,
                                 max_qty: matchingVariation.max_qty,
                                 on_backorder: isOnBackorder,
                                 backorders_allowed: matchingVariation.backorders_allowed
-                            });
+                            };
+
+                            updateOptionText(this, stockStatus);
                         }
                     });
+
+                    // Reorder options after updating their status
                     reorderOptions();
                 }
 
-                // Handle variation changes
-                $form.on('woocommerce_variation_has_changed check_variations', updateVariationStatus);
+                function initializeVariationForm() {
+                    // Initial update
+                    updateVariationStatus();
+                    
+                    // Add a class to the form to prevent WooCommerce's reset link repositioning
+                    $form.addClass('ovsi-variations-form');
+                    
+                    // Add CSS to maintain reset link position
+                    var style = document.createElement('style');
+                    style.textContent = `
+                        .ovsi-variations-form .reset_variations {
+                            position: relative !important;
+                            clear: both !important;
+                            margin: 0 !important;
+                            visibility: hidden;
+                        }
+                        .ovsi-variations-form .reset_variations.visible {
+                            visibility: visible;
+                        }
+                    `;
+                    document.head.appendChild(style);
+                    
+                    // Handle variation changes
+                    $form.on('woocommerce_variation_has_changed check_variations', function(event) {
+                        if (!event.originalEvent) {
+                            updateVariationStatus();
+                        }
+                    });
+                    
+                    // Handle direct changes to the last dropdown
+                    $lastDropdown.on('change', function(event) {
+                        if (event.originalEvent) {
+                            setTimeout(function() {
+                                $form.trigger('check_variations');
+                            }, 100);
+                        }
+                    });
 
-                // Initial update
-                updateVariationStatus();
+                    // Override WooCommerce's reset link visibility handling
+                    var $resetLink = $form.find('.reset_variations');
+                    var originalShowHideLogic = function() {
+                        var $selects = $form.find('.variations select');
+                        var hasValue = false;
+                        
+                        $selects.each(function() {
+                            if ($(this).val()) {
+                                hasValue = true;
+                                return false; // break loop
+                            }
+                        });
+                        
+                        $resetLink.toggleClass('visible', hasValue);
+                    };
+
+                    // Apply our custom visibility logic
+                    $form.on('woocommerce_variation_has_changed check_variations', originalShowHideLogic);
+                    $lastDropdown.on('change', originalShowHideLogic);
+                    
+                    // Initial visibility check
+                    originalShowHideLogic();
+                }
+
+                // Initialize the form
+                initializeVariationForm();
             });
         });
         </script>
