@@ -712,10 +712,12 @@ class OBI_Variation_Stock_Indicator {
                             }
                         });
 
+                        // Store current selection before any reordering
+                        var currentValue = $lastDropdown.val();
+
                         if (allAvailable) {
                             // Restore original order
                             var $select = $lastDropdown;
-                            var currentValue = $select.val();
                             var optionsInOriginalOrder = [];
                             
                             // Store original order using the originalTexts object
@@ -733,14 +735,16 @@ class OBI_Variation_Stock_Indicator {
                             $(optionsInOriginalOrder).each(function() {
                                 $select.append(this);
                             });
-                            
-                            // Restore selected value if it existed
-                            if (currentValue) {
-                                $select.val(currentValue);
-                            }
                         } else {
                             // Apply normal reordering
                             reorderOptions();
+                        }
+
+                        // Always restore the previous selection state
+                        if (currentValue) {
+                            $lastDropdown.val(currentValue);
+                        } else {
+                            $lastDropdown.val('');
                         }
                     } finally {
                         processVariations.isProcessing = false;
