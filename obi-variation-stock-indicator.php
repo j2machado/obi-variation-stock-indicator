@@ -665,7 +665,6 @@ class OBI_Variation_Stock_Indicator {
                 }
 
                 function processVariations(variations, selectedAttrs) {
-                    // Add a flag to prevent multiple reorderings in the same cycle
                     if (processVariations.isProcessing) return;
                     processVariations.isProcessing = true;
 
@@ -704,10 +703,46 @@ class OBI_Variation_Stock_Indicator {
                             }
                         });
 
-                        // Reorder options after updating their status, but only if we're not in a recursive call
-                        reorderOptions();
+                        // Check if all options are available (in stock or backorderable)
+                        var allAvailable = true;
+                        $lastDropdown.find('option').not(':first').each(function() {
+                            if (!$(this).data('in-stock')) {
+                                allAvailable = false;
+                                return false; // break the loop
+                            }
+                        });
+
+                        if (allAvailable) {
+                            // Restore original order
+                            var $select = $lastDropdown;
+                            var currentValue = $select.val();
+                            var optionsInOriginalOrder = [];
+                            
+                            // Store original order using the originalTexts object
+                            Object.keys(originalTexts).forEach(function(value) {
+                                var $option = $select.find('option[value="' + value + '"]');
+                                if ($option.length) {
+                                    optionsInOriginalOrder.push($option[0]);
+                                }
+                            });
+
+                            // Reorder to original state
+                            var $firstOption = $select.find('option:first');
+                            $select.find('option').remove();
+                            $select.append($firstOption);
+                            $(optionsInOriginalOrder).each(function() {
+                                $select.append(this);
+                            });
+                            
+                            // Restore selected value if it existed
+                            if (currentValue) {
+                                $select.val(currentValue);
+                            }
+                        } else {
+                            // Apply normal reordering
+                            reorderOptions();
+                        }
                     } finally {
-                        // Always clear the processing flag
                         processVariations.isProcessing = false;
                     }
                 }
