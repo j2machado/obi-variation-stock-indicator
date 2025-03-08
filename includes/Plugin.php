@@ -7,6 +7,7 @@ class Plugin {
     private $admin_settings;
     private $frontend;
     private $ajax_handler;
+    private $compatibility_manager;
 
     public static function get_instance() {
         if (is_null(self::$instance)) {
@@ -38,6 +39,10 @@ class Plugin {
         $this->admin_settings = new Admin\Settings();
         $this->frontend = new Frontend\FrontendManager();
         $this->ajax_handler = new Ajax\AjaxHandler();
+
+        // Initialize compatibility manager
+        $this->compatibility_manager = \OVSI\Compatibility\CompatibilityManager::get_instance();
+
     }
 
     private function init_hooks() {

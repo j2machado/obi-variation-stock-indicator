@@ -7,7 +7,13 @@ class Assets {
     }
 
     public function enqueue_scripts() {
-        if ( !is_product()) return;
+        // Default condition: only enqueue on product pages
+        $should_enqueue = is_product();
+        
+        // Allow compatibility handlers to modify this decision
+        $should_enqueue = apply_filters('ovsi_should_enqueue_frontend_scripts', $should_enqueue);
+        
+        if (!$should_enqueue) return;
 
         wp_enqueue_script('jquery');
 
@@ -16,7 +22,7 @@ class Assets {
             ['jquery'],
             OVSI_VERSION,
             true
-        ); // Used to have wc-add-to-cart-variation as dependency. Not needed anymore.
+        );
 
         $this->localize_script();
     }
