@@ -7,15 +7,16 @@ class Assets {
     }
 
     public function enqueue_scripts() {
-        if (!is_product()) return;
+        if ( !is_product()) return;
 
         wp_enqueue_script('jquery');
+
         wp_enqueue_script('ovsi-frontend', 
             OVSI_PLUGIN_URL . 'assets/js/frontend.js',
-            ['jquery', 'wc-add-to-cart-variation'],
+            ['jquery'],
             OVSI_VERSION,
             true
-        );
+        ); // Used to have wc-add-to-cart-variation as dependency. Not needed anymore.
 
         $this->localize_script();
     }
