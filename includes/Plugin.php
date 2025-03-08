@@ -16,9 +16,22 @@ class Plugin {
     }
 
     private function __construct() {
+        if (!$this->check_dependencies()) return;
+        
         $this->init_components();
         $this->init_hooks();
     }
+
+    private function check_dependencies() {
+        if (!class_exists('WooCommerce')) {
+            add_action('admin_notices', function() {
+                echo '<div class="error"><p>Obi Variation Stock Indicator requires WooCommerce to be installed and active.</p></div>';
+            });
+            return false;
+        }
+        return true;
+    }
+
 
     private function init_components() {
         $this->admin_manager = new Admin\AdminManager();
