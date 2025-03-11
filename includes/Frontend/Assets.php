@@ -17,6 +17,14 @@ class Assets {
 
         wp_enqueue_script('jquery');
 
+        // Register and enqueue our base stylesheet (can be empty)
+        wp_register_style('ovsi-frontend',
+            OVSI_PLUGIN_URL . 'assets/css/frontend.css',
+            [],
+            OVSI_VERSION
+        );
+        wp_enqueue_style('ovsi-frontend');
+
         wp_enqueue_script('ovsi-frontend', 
             OVSI_PLUGIN_URL . 'assets/js/frontend.js',
             ['jquery'],
