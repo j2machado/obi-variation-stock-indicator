@@ -68,9 +68,11 @@ Default messages (all customizable):
 - No multilingual support for stock status messages
 - No bulk editing of stock status display settings
 
-## Upcoming Features
+## TO-DO:
 
 - Multi-language support
+- Hackability with actions and filters.
+- Settings override per product on the single product settings.
 - Bulk editing capabilities
 - Additional WooCommerce extension compatibility
 
